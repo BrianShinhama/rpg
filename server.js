@@ -1,60 +1,116 @@
-// server.js
+// server.js — servidor customizado Next.js + WebSocket
+// Rode com: node server.js
+// No Railway: defina o Start Command como "node server.js"
+
 const { createServer } = require("http");
-const { Server } = require("socket.io");
+const { parse }        = require("url");
+const next             = require("next");
+const { WebSocketServer, WebSocket } = require("ws");
 
-const httpServer = createServer();
-const io = new Server(httpServer, {
-  cors: {
-    origin: "http://localhost:3000", // Porta do seu Next.js
-    methods: ["GET", "POST"]
-  }
-});
+const dev  = process.env.NODE_ENV !== "production";
+const port = parseInt(process.env.PORT || "3000", 10);
+const app  = next({ dev });
+const handle = app.getRequestHandler();
 
-let jogadores = [];
+/* ─── estado do lobby ──────────────────────────────────── */
+/** @type {Map<string, { id: string, name: string, ready: boolean, ws: import("ws").WebSocket }>} */
+const players = new Map();
 
-io.on("connection", (socket) => {
-  console.log("🤠 Um pistoleiro entrou no saloon:", socket.id);
+function uid() {
+  return Math.random().toString(36).slice(2, 10);
+}
 
-  // 1. Ouvir quando um jogador entra
-  socket.on("entrar", (nome) => {
-    // Evita duplicados caso a página recarregue
-    jogadores = jogadores.filter(j => j.id !== socket.id);
-    
-    if (jogadores.length < 4) {
-      jogadores.push({
-        id: socket.id,
-        nome: nome || "Pistoleiro Anônimo",
-        pronto: false
-      });
-    }
-    // Envia a lista atualizada para TODOS
-    io.emit("att_game", { jogadores, fase: "LOBBY" });
-  });
+function publicList() {
+  return Array.from(players.values()).map(({ id, name, ready }) => ({ id, name, ready }));
+}
 
-  // 2. Ouvir o botão de "Pronto"
-  socket.on("voto_pronto", () => {
-    const j = jogadores.find(p => p.id === socket.id);
-    if (j) {
-      j.pronto = !j.pronto;
-      
-      // Verifica se todos estão prontos
-      const todosProntos = jogadores.length >= 1 && jogadores.every(p => p.pronto);
-      
-      io.emit("att_game", { 
-        jogadores, 
-        fase: todosProntos ? "COMBATE" : "LOBBY" 
-      });
+function broadcast(msg) {
+  const data = JSON.stringify(msg);
+  players.forEach((p) => {
+    if (p.ws.readyState === WebSocket.OPEN) {
+      try { p.ws.send(data); } catch { /* ignora */ }
     }
   });
+}
 
-  // 3. Remover jogador instantaneamente ao sair
-  socket.on("disconnect", () => {
-    jogadores = jogadores.filter(j => j.id !== socket.id);
-    io.emit("att_game", { jogadores, fase: "LOBBY" });
-    console.log("👤 Um pistoleiro saiu pela porta dos fundos.");
+function checkStart() {
+  if (players.size < 1) return;
+  if (!Array.from(players.values()).every((p) => p.ready)) return;
+
+  broadcast({ type: "start_game", state: { round: 0, players: publicList() } });
+  players.clear();
+}
+
+/* ─── boot ─────────────────────────────────────────────── */
+app.prepare().then(() => {
+  const server = createServer((req, res) => {
+    const parsedUrl = parse(req.url, true);
+    handle(req, res, parsedUrl);
   });
-});
 
-httpServer.listen(3001, () => {
-  console.log("🚀 Servidor Socket rodando em http://localhost:3001");
+  /* WebSocket na rota /api/ws */
+  const wss = new WebSocketServer({ noServer: true });
+
+  server.on("upgrade", (req, socket, head) => {
+    const { pathname } = parse(req.url);
+    if (pathname === "/api/ws") {
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        wss.emit("connection", ws, req);
+      });
+    } else {
+      socket.destroy();
+    }
+  });
+
+  wss.on("connection", (ws) => {
+    const id = uid();
+
+    ws.send(JSON.stringify({ type: "welcome", id }));
+
+    ws.on("message", (raw) => {
+      let msg;
+      try { msg = JSON.parse(raw.toString()); } catch { return; }
+
+      /* join */
+      if (msg.type === "join" && msg.name) {
+        if (players.size >= 4) {
+          ws.send(JSON.stringify({ type: "error", message: "Saloon cheio! Máximo 4 pistoleiros." }));
+          ws.close();
+          return;
+        }
+        const name = String(msg.name).slice(0, 20);
+        players.set(id, { id, name, ready: false, ws });
+        broadcast({ type: "players", players: publicList() });
+      }
+
+      /* ready */
+      if (msg.type === "ready") {
+        const p = players.get(id);
+        if (p) {
+          p.ready = !p.ready;
+          broadcast({ type: "players", players: publicList() });
+          checkStart();
+        }
+      }
+
+      /* ping */
+      if (msg.type === "ping") {
+        ws.send(JSON.stringify({ type: "pong" }));
+      }
+    });
+
+    ws.on("close", () => {
+      players.delete(id);
+      broadcast({ type: "players", players: publicList() });
+    });
+
+    ws.on("error", () => {
+      players.delete(id);
+    });
+  });
+
+  server.listen(port, () => {
+    console.log(`🤠 Deadrails rodando em http://localhost:${port}`);
+    console.log(`🔌 WebSocket pronto em ws://localhost:${port}/api/ws`);
+  });
 });

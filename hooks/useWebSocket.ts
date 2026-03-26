@@ -35,8 +35,8 @@ export function useWebSocket({ onMessage, autoReconnect = true, maxRetries = 5 }
   const retriesRef     = useRef(0);
   const mountedRef     = useRef(true);
   const onMessageRef   = useRef(onMessage);
-const reconnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-const pingTimerRef   = useRef<ReturnType<typeof setInterval> | null>(null);
+const reconnTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+const pingTimerRef   = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   // Mantém onMessage atualizado sem recriar o connect()
   useEffect(() => { onMessageRef.current = onMessage; }, [onMessage]);
@@ -45,8 +45,8 @@ const pingTimerRef   = useRef<ReturnType<typeof setInterval> | null>(null);
   const connect = useCallback(async () => {
     if (!mountedRef.current) return;
 
-clearTimeout(reconnTimerRef.current ?? undefined);
-clearInterval(pingTimerRef.current ?? undefined);
+clearTimeout(reconnTimerRef.current);
+clearInterval(pingTimerRef.current);
 
     setStatus("connecting");
 

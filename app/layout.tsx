@@ -15,7 +15,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           href="https://fonts.googleapis.com/css2?family=Rye&family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Special+Elite&display=swap"
           rel="stylesheet"
         />
-      </head>
+      </head> 
       <body>{children}</body>
     </html>
   );

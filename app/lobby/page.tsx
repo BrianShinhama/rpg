@@ -22,7 +22,9 @@ export default function Lobby() {
     setPlayerName(name);
 
     // 2. Conecta ao servidor Socket.io
-    const socket = io("http://localhost:3001");
+ const socket = io("http://localhost:3001", {
+  transports: ["websocket"] // Garante uma conexão mais direta e rápida
+});
     socketRef.current = socket;
 
     socket.on("connect", () => {

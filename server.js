@@ -1,87 +1,60 @@
+// server.js
 const { createServer } = require("http");
 const { Server } = require("socket.io");
 
 const httpServer = createServer();
 const io = new Server(httpServer, {
-  cors: { origin: "*", methods: ["GET", "POST"] }
+  cors: {
+    origin: "http://localhost:3000", // Porta do seu Next.js
+    methods: ["GET", "POST"]
+  }
 });
 
 let jogadores = [];
-let fase = "LOBBY"; // LOBBY, LOJA, COMBATE
-let sessao = 1;
-let boss = null;
-
-const BOSSES = [
-  { nome: "Bando de Ladrões", hp: 150, maxHp: 150, atk: 10 },
-  { nome: "O Renegado", hp: 400, maxHp: 400, atk: 20 },
-  { nome: "Irmãos Dalton", hp: 800, maxHp: 800, atk: 35 },
-  { nome: "Xerife Corrupto", hp: 1500, maxHp: 1500, atk: 50 },
-  { nome: "O REI DE CINZAS", hp: 3000, maxHp: 3000, atk: 80 }
-];
 
 io.on("connection", (socket) => {
+  console.log("🤠 Um pistoleiro entrou no saloon:", socket.id);
+
+  // 1. Ouvir quando um jogador entra
   socket.on("entrar", (nome) => {
-    if (jogadores.length < 4 && fase === "LOBBY") {
+    // Evita duplicados caso a página recarregue
+    jogadores = jogadores.filter(j => j.id !== socket.id);
+    
+    if (jogadores.length < 4) {
       jogadores.push({
         id: socket.id,
-        nome: nome || "Pistoleiro",
-        hp: 100,
-        maxHp: 100,
-        dinheiro: 100,
-        pronto: false,
-        arma: { nome: "Soco Inglês", atk: 8 }
+        nome: nome || "Pistoleiro Anônimo",
+        pronto: false
       });
-      io.emit("att_game", { jogadores, fase, sessao, boss });
     }
+    // Envia a lista atualizada para TODOS
+    io.emit("att_game", { jogadores, fase: "LOBBY" });
   });
 
+  // 2. Ouvir o botão de "Pronto"
   socket.on("voto_pronto", () => {
     const j = jogadores.find(p => p.id === socket.id);
     if (j) {
       j.pronto = !j.pronto;
-      if (jogadores.length >= 1 && jogadores.every(p => p.pronto)) {
-        jogadores.forEach(p => p.pronto = false);
-        if (fase === "LOBBY" || fase === "LOJA") {
-          fase = "COMBATE";
-          boss = { ...BOSSES[sessao - 1] };
-        }
-      }
-      io.emit("att_game", { jogadores, fase, sessao, boss });
+      
+      // Verifica se todos estão prontos
+      const todosProntos = jogadores.length >= 1 && jogadores.every(p => p.pronto);
+      
+      io.emit("att_game", { 
+        jogadores, 
+        fase: todosProntos ? "COMBATE" : "LOBBY" 
+      });
     }
   });
 
-  socket.on("atacar", () => {
-    const j = jogadores.find(p => p.id === socket.id);
-    if (j && j.hp > 0 && fase === "COMBATE" && boss) {
-      boss.hp -= j.arma.atk;
-      if (boss.hp <= 0) {
-        fase = "LOJA";
-        jogadores.forEach(p => { p.dinheiro += 150 * sessao; p.pronto = false; });
-        sessao++;
-        boss = null;
-      } else {
-        // Boss ataca alguém aleatório
-        const alvo = jogadores[Math.floor(Math.random() * jogadores.length)];
-        if (alvo.hp > 0) alvo.hp -= boss.atk;
-      }
-      io.emit("att_game", { jogadores, fase, sessao, boss });
-    }
-  });
-
-  socket.on("comprar", (item) => {
-    const j = jogadores.find(p => p.id === socket.id);
-    if (j && j.dinheiro >= item.preco) {
-      j.dinheiro -= item.preco;
-      if (item.tipo === "arma") j.arma = { nome: item.nome, atk: item.atk };
-      if (item.tipo === "cura") j.hp = Math.min(j.hp + 50, j.maxHp);
-      io.emit("att_game", { jogadores, fase, sessao, boss });
-    }
-  });
-
+  // 3. Remover jogador instantaneamente ao sair
   socket.on("disconnect", () => {
-    jogadores = jogadores.filter(p => p.id !== socket.id);
-    io.emit("att_game", { jogadores, fase, sessao, boss });
+    jogadores = jogadores.filter(j => j.id !== socket.id);
+    io.emit("att_game", { jogadores, fase: "LOBBY" });
+    console.log("👤 Um pistoleiro saiu pela porta dos fundos.");
   });
 });
 
-httpServer.listen(process.env.PORT || 3001);
+httpServer.listen(3001, () => {
+  console.log("🚀 Servidor Socket rodando em http://localhost:3001");
+});

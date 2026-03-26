@@ -1,14 +1,5 @@
-// hooks/useWebSocket.ts
-// Hook que gerencia a conexão WebSocket com o servidor /api/ws.
-//
-// PROBLEMAS CORRIGIDOS vs. abordagem anterior:
-//   1. O servidor WS precisa ser "aquecido" via fetch() antes do new WebSocket().
-//      Sem isso, o servidor nunca registra o listener de "upgrade" e a conexão falha.
-//   2. Reconexão automática com backoff exponencial.
-//   3. Heartbeat (ping/pong) para manter a conexão viva e detectar quedas.
-//   4. Cleanup correto no unmount (evita memory leaks e conexões zumbis).
-
 "use client";
+// hooks/useWebSocket.ts
 
 import { useEffect, useRef, useCallback, useState } from "react";
 
@@ -28,148 +19,112 @@ export type ServerMessage =
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected" | "error";
 
-interface UseWebSocketOptions {
+interface Options {
   onMessage?: (msg: ServerMessage) => void;
-  /** Reconectar automaticamente? (padrão: true) */
   autoReconnect?: boolean;
-  /** Máximo de tentativas de reconexão (padrão: 5) */
   maxRetries?: number;
 }
 
-interface UseWebSocketReturn {
-  status: ConnectionStatus;
-  send: (msg: object) => void;
-  /** ID gerado pelo servidor para este cliente */
-  myId: string | null;
-}
-
 /* ─── HOOK ──────────────────────────────────────────────────── */
-export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketReturn {
-  const { onMessage, autoReconnect = true, maxRetries = 5 } = options;
+export function useWebSocket({ onMessage, autoReconnect = true, maxRetries = 5 }: Options = {}) {
+  const [status, setStatus] = useState<ConnectionStatus>("connecting");
+  const [myId, setMyId]     = useState<string | null>(null);
 
-  const [status, setStatus] = useState<ConnectionStatus>("disconnected");
-  const [myId, setMyId] = useState<string | null>(null);
+  // Refs estáveis — nunca mudam de referência, nunca causam re-render
+  const wsRef          = useRef<WebSocket | null>(null);
+  const retriesRef     = useRef(0);
+  const mountedRef     = useRef(true);
+  const onMessageRef   = useRef(onMessage);
+const reconnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+const pingTimerRef   = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const wsRef = useRef<WebSocket | null>(null);
-  const retriesRef = useRef(0);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const mountedRef = useRef(true);
-
-  // Usa uma ref para onMessage para não recriar o connect() a cada render
-  const onMessageRef = useRef(onMessage);
+  // Mantém onMessage atualizado sem recriar o connect()
   useEffect(() => { onMessageRef.current = onMessage; }, [onMessage]);
 
-  const clearTimers = useCallback(() => {
-    if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-    if (pingTimerRef.current) clearInterval(pingTimerRef.current);
-  }, []);
-
+  // connect() usa apenas refs → sem dependências externas → useCallback com [] é seguro
   const connect = useCallback(async () => {
     if (!mountedRef.current) return;
-    clearTimers();
+
+clearTimeout(reconnTimerRef.current ?? undefined);
+clearInterval(pingTimerRef.current ?? undefined);
 
     setStatus("connecting");
 
-    // ── PASSO 1: Inicializa o servidor WS via fetch ──────────────
-    // Sem este fetch, o handler /api/ws nunca é chamado e o listener
-    // de "upgrade" nunca é registrado → conexão WebSocket falha silenciosamente.
+    // PASSO 1: Inicializa o servidor — sem isso o listener de "upgrade"
+    // ainda não existe e o WebSocket abaixo falha silenciosamente.
     try {
       await fetch("/api/ws");
     } catch {
-      console.warn("[useWebSocket] Falha ao inicializar /api/ws. Tentando mesmo assim...");
+      // Se o fetch falhar (ex: offline), tenta conectar mesmo assim
     }
 
-    // ── PASSO 2: Conecta via WebSocket ───────────────────────────
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const wsUrl = `${protocol}://${window.location.host}/api/ws`;
+    if (!mountedRef.current) return;
 
+    // PASSO 2: Abre a conexão WebSocket
+    const proto = location.protocol === "https:" ? "wss" : "ws";
     let ws: WebSocket;
     try {
-      ws = new WebSocket(wsUrl);
-    } catch (err) {
-      console.error("[useWebSocket] Falha ao criar WebSocket:", err);
+      ws = new WebSocket(`${proto}://${location.host}/api/ws`);
+    } catch {
       setStatus("error");
       return;
     }
-
     wsRef.current = ws;
 
     ws.onopen = () => {
       if (!mountedRef.current) { ws.close(); return; }
-      console.log("[useWebSocket] Conectado!");
       retriesRef.current = 0;
       setStatus("connected");
-
-      // Heartbeat a cada 20s para manter a conexão e detectar quedas
+      // Heartbeat para manter a conexão viva
       pingTimerRef.current = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: "ping" }));
-        }
-      }, 20_000);
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "ping" }));
+      }, 25_000);
     };
 
-    ws.onmessage = (event: MessageEvent) => {
+    ws.onmessage = ({ data }) => {
       let msg: ServerMessage;
-      try {
-        msg = JSON.parse(event.data as string);
-      } catch {
-        console.warn("[useWebSocket] Mensagem não-JSON recebida:", event.data);
-        return;
-      }
-
-      if (msg.type === "welcome") {
-        setMyId(msg.id);
-      }
-
+      try { msg = JSON.parse(data); } catch { return; }
+      if (msg.type === "welcome") setMyId(msg.id);
       onMessageRef.current?.(msg);
     };
 
-    ws.onclose = (event) => {
-      if (pingTimerRef.current) clearInterval(pingTimerRef.current);
+    ws.onclose = ({ code }) => {
+      clearInterval(pingTimerRef.current);
       if (!mountedRef.current) return;
-
-      console.log(`[useWebSocket] Desconectado — código ${event.code}, motivo: ${event.reason || "nenhum"}`);
       setStatus("disconnected");
 
-      // Reconexão automática com backoff exponencial
-      if (autoReconnect && retriesRef.current < maxRetries && event.code !== 1008) {
-        const delay = Math.min(1000 * 2 ** retriesRef.current, 15_000);
-        retriesRef.current += 1;
-        console.log(`[useWebSocket] Reconectando em ${delay}ms (tentativa ${retriesRef.current}/${maxRetries})...`);
-        reconnectTimerRef.current = setTimeout(connect, delay);
+      // Reconexão com backoff exponencial
+      // Não reconecta se o servidor fechou com 1008 (lobby cheio etc.)
+      if (autoReconnect && retriesRef.current < maxRetries && code !== 1008) {
+        const delay = Math.min(1_000 * 2 ** retriesRef.current, 16_000);
+        retriesRef.current++;
+        reconnTimerRef.current = setTimeout(connect, delay);
       }
     };
 
-    ws.onerror = (err) => {
-      console.error("[useWebSocket] Erro no WebSocket:", err);
-      setStatus("error");
-    };
-  }, [autoReconnect, maxRetries, clearTimers]);
+    ws.onerror = () => setStatus("error");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); //   [] é intencional: connect nunca muda, só usa refs
 
-  // Inicia conexão ao montar
+  // Inicia a conexão uma única vez
   useEffect(() => {
     mountedRef.current = true;
     connect();
-
     return () => {
       mountedRef.current = false;
-      clearTimers();
+      clearTimeout(reconnTimerRef.current);
+      clearInterval(pingTimerRef.current);
       if (wsRef.current) {
-        wsRef.current.onclose = null; // evita reconexão ao desmontar
+        wsRef.current.onclose = null; // evita reconexão no unmount
         wsRef.current.close();
-        wsRef.current = null;
       }
     };
-  }, [connect, clearTimers]);
+  }, [connect]); // connect tem ref estável → esse efeito roda só uma vez
 
   const send = useCallback((msg: object) => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      console.warn("[useWebSocket] Tentativa de envio com WebSocket fechado.");
-      return;
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(msg));
     }
-    ws.send(JSON.stringify(msg));
   }, []);
 
   return { status, send, myId };

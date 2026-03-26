@@ -1,36 +1,76 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🤠 Deadrails — RPG do Oeste
 
-## Getting Started
+Jogo multiplayer de sobrevivência no Velho Oeste. Até 4 jogadores por partida.
 
-First, run the development server:
+## Como jogar
+
+1. Cada jogador entra com seu nome na tela inicial
+2. No lobby, todos devem apertar **"Estou Pronto"**
+3. A partida começa com a **loja de armas**
+4. Combata inimigos clicando neles para atacar
+5. Sobreviva às 5 rodadas e derrote o boss final!
+
+## Estrutura das Rodadas
+
+| Rodada | Capangas | Boss |
+|--------|----------|------|
+| 1 | Bêbados e ladrões | Black Pete |
+| 2 | Pistoleiros recrutas | Mad Dog McGee |
+| 3 | Bandoleiros + franco-atirador | Diamondback Dillo |
+| 4 | Guardas da gangue | El Cuervo Rojo |
+| 5 | Assassinos de elite | General Calamity |
+
+## Setup Local (Desenvolvimento)
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Acesse `http://localhost:3000` em múltiplas abas ou dispositivos na mesma rede.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+O WebSocket funciona automaticamente em desenvolvimento local.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Deploy para Multiplayer Real
 
-## Learn More
+### Railway (Recomendado — grátis)
 
-To learn more about Next.js, take a look at the following resources:
+1. Crie conta em [railway.app](https://railway.app)
+2. Conecte seu repositório GitHub
+3. Railway detecta Next.js automaticamente
+4. **WebSocket funciona nativamente** — multiplayer completo
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Render
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. Crie conta em [render.com](https://render.com)
+2. New Web Service → conecte o repo
+3. Build: `npm run build` | Start: `npm start`
+4. WebSocket suportado
 
-## Deploy on Vercel
+### Vercel (Limitado)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+O Vercel **não suporta WebSocket persistente** em funções serverless.
+O jogo funcionará em **modo local** (um jogador por aba, mas compartilha estado via localStorage/BroadcastChannel — funciona em múltiplas abas no mesmo dispositivo).
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Para multiplayer real no Vercel, seria necessário adicionar:
+- Pusher / Ably (WebSocket as a service)
+- PartyKit
+
+## Armas Disponíveis
+
+| Arma | Dano | Precisão | Custo |
+|------|------|----------|-------|
+| Soco Inglês | 3-7 | 90% | Grátis |
+| Derringer | 8-14 | 75% | $30 |
+| Colt .45 | 15-25 | 80% | $70 |
+| Remington | 20-38 | 82% | $130 |
+| Espingarda | 25-45 | 65% | $150 |
+| Winchester | 30-50 | 88% | $220 |
+
+## Itens de Cura
+
+| Item | HP | Custo |
+|------|----|-------|
+| Erva do Deserto | +20 | $25 |
+| Tônico do Doutor | +40 | $50 |
+| Whiskey Puro | +65 | $80 |

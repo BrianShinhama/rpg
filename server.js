@@ -1,63 +1,60 @@
-const express = require("express");
-const http = require("http");
+// server.js
+const { createServer } = require("http");
 const { Server } = require("socket.io");
-const cors = require("cors");
 
-const app = express();
-app.use(cors());
-
-const server = http.createServer(app);
-
-const io = new Server(server, {
+const httpServer = createServer();
+const io = new Server(httpServer, {
   cors: {
-    origin: "http://localhost:3000", // URL do seu Next.js
+    origin: "http://localhost:3000", // Porta do seu Next.js
     methods: ["GET", "POST"]
   }
 });
 
 let jogadores = [];
-let faseAtual = "LOBBY";
 
 io.on("connection", (socket) => {
-  console.log("Novo pistoleiro conectado:", socket.id);
+  console.log("🤠 Um pistoleiro entrou no saloon:", socket.id);
 
-  // Evento ao entrar no Saloon
+  // 1. Ouvir quando um jogador entra
   socket.on("entrar", (nome) => {
-    // Evita duplicados e limita a 4 jogadores
-    if (jogadores.length < 4) {
-      jogadores.push({ id: socket.id, nome, pronto: false });
-    }
-    // Avisa todo mundo da nova lista
-    io.emit("att_game", { jogadores, fase: faseAtual });
-  });
-
-  // Evento de "Estou Pronto"
-  socket.on("voto_pronto", () => {
-    const player = jogadores.find(p => p.id === socket.id);
-    if (player) {
-      player.pronto = !player.pronto;
-    }
-
-    // Checa se todos estão prontos para iniciar o combate
-    const todosProntos = jogadores.length >= 1 && jogadores.every(p => p.pronto);
+    // Evita duplicados caso a página recarregue
+    jogadores = jogadores.filter(j => j.id !== socket.id);
     
-    if (todosProntos) {
-      faseAtual = "COMBATE";
+    if (jogadores.length < 4) {
+      jogadores.push({
+        id: socket.id,
+        nome: nome || "Pistoleiro Anônimo",
+        pronto: false
+      });
     }
-
-    io.emit("att_game", { jogadores, fase: faseAtual });
+    // Envia a lista atualizada para TODOS
+    io.emit("att_game", { jogadores, fase: "LOBBY" });
   });
 
-  // Limpeza ao sair
+  // 2. Ouvir o botão de "Pronto"
+  socket.on("voto_pronto", () => {
+    const j = jogadores.find(p => p.id === socket.id);
+    if (j) {
+      j.pronto = !j.pronto;
+      
+      // Verifica se todos estão prontos
+      const todosProntos = jogadores.length >= 1 && jogadores.every(p => p.pronto);
+      
+      io.emit("att_game", { 
+        jogadores, 
+        fase: todosProntos ? "COMBATE" : "LOBBY" 
+      });
+    }
+  });
+
+  // 3. Remover jogador instantaneamente ao sair
   socket.on("disconnect", () => {
-    jogadores = jogadores.filter(p => p.id !== socket.id);
-    // Se o Saloon esvaziar, volta para o Lobby
-    if (jogadores.length === 0) faseAtual = "LOBBY";
-    io.emit("att_game", { jogadores, fase: faseAtual });
-    console.log("Pistoleiro saiu:", socket.id);
+    jogadores = jogadores.filter(j => j.id !== socket.id);
+    io.emit("att_game", { jogadores, fase: "LOBBY" });
+    console.log("👤 Um pistoleiro saiu pela porta dos fundos.");
   });
 });
 
-server.listen(3001, () => {
-  console.log("🤠 Servidor do Saloon rodando na porta 3001");
+httpServer.listen(3001, () => {
+  console.log("🚀 Servidor Socket rodando em http://localhost:3001");
 });

@@ -7,7 +7,7 @@
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { WebSocketServer, WebSocket } from "ws";
-import type { IncomingMessage } from "http";
+import type { IncomingMessage, Server as HttpServer } from "http";
 import type { Duplex } from "stream";
 
 export const config = { api: { bodyParser: false } };
@@ -71,7 +71,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
   }
 
   // Init WSS once
-  const server = (res.socket as NodeJS.Socket & { server: import("http").Server & { wss?: WebSocketServer } }).server;
+  const server = (res.socket as unknown as NodeJS.Socket & { server: import("http").Server & { wss?: WebSocketServer } }).server;
 
   if (!global._wss) {
     const wss = new WebSocketServer({ noServer: true });

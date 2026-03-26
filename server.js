@@ -1,19 +1,14 @@
-// server.js — servidor customizado Next.js + WebSocket
-// Rode com: node server.js
-// No Railway: defina o Start Command como "node server.js"
-
 const { createServer } = require("http");
-const { parse }        = require("url");
-const next             = require("next");
+const { parse } = require("url");
+const next = require("next");
 const { WebSocketServer, WebSocket } = require("ws");
 
-const dev  = process.env.NODE_ENV !== "production";
+const dev = process.env.NODE_ENV !== "production";
 const port = parseInt(process.env.PORT || "3000", 10);
-const app  = next({ dev });
+const app = next({ dev });
 const handle = app.getRequestHandler();
 
-/* ─── estado do lobby ──────────────────────────────────── */
-/** @type {Map<string, { id: string, name: string, ready: boolean, ws: import("ws").WebSocket }>} */
+/* ─── ESTADO DO LOBBY ──────────────────────────────────── */
 const players = new Map();
 
 function uid() {
@@ -28,20 +23,25 @@ function broadcast(msg) {
   const data = JSON.stringify(msg);
   players.forEach((p) => {
     if (p.ws.readyState === WebSocket.OPEN) {
-      try { p.ws.send(data); } catch { /* ignora */ }
+      try { p.ws.send(data); } catch (e) { /* falha silenciosa */ }
     }
   });
 }
 
 function checkStart() {
-  if (players.size < 1) return;
-  if (!Array.from(players.values()).every((p) => p.ready)) return;
-
-  broadcast({ type: "start_game", state: { round: 0, players: publicList() } });
-  players.clear();
+  const playerArray = Array.from(players.values());
+  if (playerArray.length < 1) return;
+  // Se todos os presentes estiverem prontos
+  if (playerArray.every((p) => p.ready)) {
+    broadcast({ 
+      type: "start_game", 
+      state: { round: 1, players: publicList() } 
+    });
+    // Opcional: não limpe o Map aqui se quiser manter os sockets vivos durante o jogo
+  }
 }
 
-/* ─── boot ─────────────────────────────────────────────── */
+/* ─── BOOT ─────────────────────────────────────────────── */
 app.prepare().then(() => {
   const server = createServer((req, res) => {
     const parsedUrl = parse(req.url, true);
@@ -64,6 +64,7 @@ app.prepare().then(() => {
 
   wss.on("connection", (ws) => {
     const id = uid();
+    console.log(`🤠 Novo pistoleiro tentando entrar... (ID: ${id})`);
 
     ws.send(JSON.stringify({ type: "welcome", id }));
 
@@ -72,14 +73,14 @@ app.prepare().then(() => {
       try { msg = JSON.parse(raw.toString()); } catch { return; }
 
       /* join */
-      if (msg.type === "join" && msg.name) {
+      if (msg.type === "join") {
         if (players.size >= 4) {
-          ws.send(JSON.stringify({ type: "error", message: "Saloon cheio! Máximo 4 pistoleiros." }));
-          ws.close();
+          ws.send(JSON.stringify({ type: "error", message: "Saloon cheio!" }));
           return;
         }
-        const name = String(msg.name).slice(0, 20);
+        const name = String(msg.name || "Pistoleiro").slice(0, 20);
         players.set(id, { id, name, ready: false, ws });
+        console.log(`✅ ${name} entrou no Saloon.`);
         broadcast({ type: "players", players: publicList() });
       }
 
@@ -93,15 +94,19 @@ app.prepare().then(() => {
         }
       }
 
-      /* ping */
+      /* ping (necessário para manter conexão viva no Railway) */
       if (msg.type === "ping") {
         ws.send(JSON.stringify({ type: "pong" }));
       }
     });
 
     ws.on("close", () => {
-      players.delete(id);
-      broadcast({ type: "players", players: publicList() });
+      const p = players.get(id);
+      if (p) {
+        console.log(`👤 ${p.name} saiu do Saloon.`);
+        players.delete(id);
+        broadcast({ type: "players", players: publicList() });
+      }
     });
 
     ws.on("error", () => {
@@ -109,8 +114,8 @@ app.prepare().then(() => {
     });
   });
 
-  server.listen(port, () => {
-    console.log(`🤠 Deadrails rodando em http://localhost:${port}`);
-    console.log(`🔌 WebSocket pronto em ws://localhost:${port}/api/ws`);
+  server.listen(port, (err) => {
+    if (err) throw err;
+    console.log(`> 🤠 Deadrails pronto em http://localhost:${port}`);
   });
 });

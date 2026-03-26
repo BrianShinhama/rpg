@@ -8,62 +8,62 @@ interface Player {
   ready: boolean;
 }
 
+/* ticks a counter every `ms` milliseconds */
+function useTick(ms = 500) {
+  const [t, setT] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setT(n => n + 1), ms);
+    return () => clearInterval(id);
+  }, [ms]);
+  return t;
+}
+
 export default function Lobby() {
   const router = useRouter();
-  const [myId, setMyId] = useState<string | null>(null);
-  const [players, setPlayers] = useState<Player[]>([]);
+  const [myId, setMyId]           = useState<string | null>(null);
+  const [players, setPlayers]     = useState<Player[]>([]);
   const [connected, setConnected] = useState(false);
+  const [launching, setLaunching] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
+  const tick  = useTick(500);
+
+  /* animated connecting dots */
+  const dots = ".".repeat((tick % 3) + 1);
 
   const connect = useCallback(() => {
-    // 1. Inicializa o endpoint que sobe o WSS no servidor Next.js
     fetch("/api/ws").finally(() => {
       const protocol = window.location.protocol === "https:" ? "wss" : "ws";
       const ws = new WebSocket(`${protocol}://${window.location.host}/api/ws`);
       wsRef.current = ws;
 
-      ws.onopen = () => {
-        setConnected(true);
-      };
+      ws.onopen = () => setConnected(true);
 
       ws.onmessage = (event) => {
         let msg: { type: string; id?: string; players?: Player[] };
         try { msg = JSON.parse(event.data); } catch { return; }
 
-        // 2. Servidor enviou nosso ID — agora enviamos o join com o nome
         if (msg.type === "welcome" && msg.id) {
           setMyId(msg.id);
           const name = localStorage.getItem("playerName") || "Pistoleiro";
           ws.send(JSON.stringify({ type: "join", name }));
         }
-
-        // 3. Lista de jogadores atualizada
         if (msg.type === "players" && msg.players) {
           setPlayers(msg.players);
         }
-
-        // 4. Jogo iniciou — todos prontos
         if (msg.type === "start_game") {
-          router.push("/game");
+          setLaunching(true);
+          setTimeout(() => router.push("/game"), 1800);
         }
       };
 
-      ws.onclose = () => {
-        setConnected(false);
-        wsRef.current = null;
-      };
-
-      ws.onerror = () => {
-        setConnected(false);
-      };
+      ws.onclose = () => { setConnected(false); wsRef.current = null; };
+      ws.onerror = () => setConnected(false);
     });
   }, [router]);
 
   useEffect(() => {
     connect();
-    return () => {
-      wsRef.current?.close();
-    };
+    return () => { wsRef.current?.close(); };
   }, [connect]);
 
   const toggleReady = () => {
@@ -72,131 +72,368 @@ export default function Lobby() {
     }
   };
 
-  const me = players.find(p => p.id === myId);
-  const allReady = players.length >= 1 && players.every(p => p.ready);
-  const ICONS = ["🤠", "🧔", "🧑", "👴"];
-  const SLOTS = ["Pistoleiro I", "Pistoleiro II", "Pistoleiro III", "Pistoleiro IV"];
+  const me         = players.find(p => p.id === myId);
+  const allReady   = players.length >= 1 && players.every(p => p.ready);
+  const readyCount = players.filter(p => p.ready).length;
+
+  const AVATARS = ["🤠", "🧔", "🧑", "👴"];
+  const TITLES  = ["Pistoleiro I", "Pistoleiro II", "Pistoleiro III", "Pistoleiro IV"];
 
   return (
-    <main style={{
-      minHeight: "100vh",
-      background: "#0a0906",
-      backgroundImage: "radial-gradient(ellipse 70% 50% at 50% 0%, #1e1005 0%, #0a0906 60%)",
-      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-      padding: "40px 24px", color: "#e6e6f0"
-    }}>
-      <div style={{ maxWidth: 540, width: "100%" }}>
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Rye&family=Special+Elite&family=Playfair+Display:ital@0;1&display=swap');
 
-        {/* Header */}
-        <div style={{ textAlign: "center", marginBottom: 36 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "center", marginBottom: 14 }}>
-            <div style={{ width: 48, height: 1, background: "linear-gradient(90deg, transparent, #5c3518)" }} />
-            <span style={{ color: "#8a6e44", fontSize: "0.58rem", letterSpacing: "0.3em", textTransform: "uppercase" }}>Saloon</span>
-            <div style={{ width: 48, height: 1, background: "linear-gradient(90deg, #5c3518, transparent)" }} />
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+          --bg:         #080705;
+          --panel:      #110e0b;
+          --panel-2:    #181410;
+          --gold:       #c9a96e;
+          --gold-dim:   #7a5e35;
+          --gold-shine: #f0d090;
+          --rust:       #8a3010;
+          --rust-hi:    #b84020;
+          --leather:    #4a2810;
+          --paper:      #d4c9b8;
+          --paper-dim:  #7a6e5e;
+          --green:      #2a6a2a;
+          --green-hi:   #3aaa3a;
+          --font-d: 'Rye', serif;
+          --font-b: 'Special Elite', monospace;
+          --font-p: 'Playfair Display', serif;
+        }
+
+        body { background: var(--bg); }
+
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: var(--bg); }
+        ::-webkit-scrollbar-thumb { background: var(--leather); border-radius: 2px; }
+
+        /* ── root ── */
+        .lob-root {
+          min-height: 100vh;
+          background: var(--bg);
+          background-image:
+            radial-gradient(ellipse 90% 55% at 50% 0%, #281505 0%, transparent 65%),
+            url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: 40px 20px;
+          font-family: var(--font-b);
+          color: var(--paper);
+          position: relative;
+        }
+        .lob-root::before {
+          content: '';
+          position: fixed; inset: 0; pointer-events: none;
+          background: radial-gradient(ellipse 60% 35% at 50% 100%, rgba(122,48,16,0.07) 0%, transparent 70%);
+        }
+
+        /* ── card ── */
+        .lob-card {
+          width: 100%; max-width: 520px;
+          background: var(--panel);
+          border: 1px solid var(--leather);
+          border-radius: 3px;
+          padding: 36px 32px 28px;
+          box-shadow: 0 0 0 1px #0a0805, 0 10px 56px rgba(0,0,0,0.9),
+                      inset 0 1px 0 rgba(201,169,110,0.06);
+          position: relative;
+          animation: cardIn 0.55s cubic-bezier(0.16,1,0.3,1) both;
+        }
+        @keyframes cardIn {
+          from { opacity:0; transform: translateY(20px) scale(0.975); }
+          to   { opacity:1; transform: translateY(0)    scale(1); }
+        }
+        /* corner ornaments */
+        .lob-card::before, .lob-card::after {
+          content:''; position:absolute;
+          width:14px; height:14px; border-color:var(--gold-dim); border-style:solid; opacity:0.45;
+        }
+        .lob-card::before { top:10px; left:10px; border-width:1px 0 0 1px; }
+        .lob-card::after  { bottom:10px; right:10px; border-width:0 1px 1px 0; }
+
+        /* ── eyebrow ── */
+        .eyebrow {
+          display:flex; align-items:center; gap:12px; justify-content:center; margin-bottom:10px;
+        }
+        .eyebrow-ln { flex:1; height:1px; background:linear-gradient(90deg, transparent, var(--leather)); }
+        .eyebrow-ln.r { background:linear-gradient(90deg, var(--leather), transparent); }
+        .eyebrow-txt { font-size:0.52rem; letter-spacing:0.35em; color:var(--gold-dim); text-transform:uppercase; }
+
+        .lob-title {
+          font-family:var(--font-d); color:var(--gold);
+          font-size:clamp(1.5rem,4vw,2.1rem);
+          text-align:center; letter-spacing:0.07em; line-height:1.15;
+          text-shadow:0 0 40px rgba(201,169,110,0.22), 0 3px 12px rgba(0,0,0,0.8);
+          margin-bottom:4px;
+        }
+        .lob-sub {
+          font-family:var(--font-p); font-style:italic; color:var(--paper-dim);
+          font-size:0.75rem; text-align:center; letter-spacing:0.07em; margin-bottom:8px;
+        }
+
+        /* ── status pill ── */
+        .conn-pill { display:flex; align-items:center; gap:7px; justify-content:center; margin-bottom:22px; }
+        .conn-dot  { width:6px; height:6px; border-radius:50%; flex-shrink:0; transition:all 0.4s; }
+        .conn-dot.on  { background:var(--green-hi); box-shadow:0 0 6px var(--green-hi); animation:dpulse 2s infinite; }
+        .conn-dot.off { background:var(--rust); }
+        @keyframes dpulse { 0%,100%{box-shadow:0 0 4px var(--green-hi)} 50%{box-shadow:0 0 12px var(--green-hi)} }
+        .conn-txt { font-size:0.58rem; color:var(--paper-dim); letter-spacing:0.1em; }
+
+        /* ── divider ── */
+        .div-west { display:flex; align-items:center; gap:10px; margin:0 0 16px; }
+        .div-west::before,.div-west::after {
+          content:''; flex:1; height:1px;
+          background:linear-gradient(90deg, transparent, var(--leather), transparent);
+        }
+        .div-west span { font-size:0.7rem; color:var(--gold-dim); }
+
+        /* ── slots ── */
+        .slots { display:flex; flex-direction:column; gap:7px; margin-bottom:18px; }
+
+        .slot {
+          display:flex; align-items:center; gap:12px;
+          padding:10px 13px; border-radius:2px;
+          border:1px dashed #1c1208; background:rgba(10,9,6,0.25);
+          transition:all 0.3s; position:relative; overflow:hidden;
+        }
+        .slot.occ  { border-style:solid; border-color:#2d1a0a; background:rgba(18,14,9,0.7); }
+        .slot.mine { border-color:var(--gold-dim); background:rgba(201,169,110,0.048); box-shadow:inset 0 0 24px rgba(201,169,110,0.04); }
+        .slot.mine::before {
+          content:''; position:absolute; left:0; top:0; bottom:0; width:2px; background:var(--gold-dim);
+        }
+        .slot-enter { animation: slotIn 0.35s cubic-bezier(0.16,1,0.3,1) both; }
+        @keyframes slotIn {
+          from { opacity:0; transform:translateX(-10px); }
+          to   { opacity:1; transform:translateX(0); }
+        }
+
+        .slot-av {
+          width:36px; height:36px; border-radius:2px; flex-shrink:0;
+          display:flex; align-items:center; justify-content:center; font-size:1.2rem;
+          background:var(--panel-2); border:1px solid #2a1a0a; transition:border-color 0.3s;
+        }
+        .slot.mine .slot-av { border-color:var(--gold-dim); }
+        .slot.empty .slot-av { background:transparent; border-color:#181208; }
+
+        .slot-info { flex:1; min-width:0; }
+        .slot-name { font-size:0.86rem; color:var(--paper); display:flex; align-items:center; gap:7px; line-height:1.2; }
+        .slot.mine .slot-name { color:var(--gold); }
+        .you-tag {
+          font-size:0.45rem; color:var(--gold-dim); letter-spacing:0.2em; text-transform:uppercase;
+          border:1px solid var(--gold-dim); border-radius:20px; padding:1px 5px;
+        }
+        .slot-rank { font-size:0.52rem; color:var(--leather); text-transform:uppercase; letter-spacing:0.14em; margin-top:2px; }
+        .slot-empty-lbl { font-size:0.58rem; color:#231810; text-transform:uppercase; letter-spacing:0.12em; }
+
+        .badge {
+          padding:3px 9px; border-radius:20px; font-size:0.52rem;
+          text-transform:uppercase; letter-spacing:0.12em; flex-shrink:0;
+          border:1px solid; transition:all 0.35s;
+        }
+        .badge.rdy { border-color:var(--green); background:rgba(42,106,42,0.15); color:var(--green-hi); }
+        .badge.wai { border-color:#2d1a0a; background:transparent; color:#4a2810; }
+
+        /* ── progress ── */
+        .prog-wrap { margin-bottom:16px; }
+        .prog-lbl { display:flex; justify-content:space-between; font-size:0.55rem; color:var(--paper-dim); letter-spacing:0.1em; margin-bottom:6px; }
+        .prog-track { height:3px; background:#1c1208; border-radius:2px; overflow:hidden; border:1px solid #2a1a0a; }
+        .prog-fill {
+          height:100%; border-radius:2px;
+          background:linear-gradient(90deg, var(--gold-dim), var(--gold));
+          transition:width 0.5s cubic-bezier(0.34,1.56,0.64,1);
+          position:relative;
+        }
+        .prog-fill::after {
+          content:''; position:absolute; right:0; top:0; bottom:0; width:16px;
+          background:linear-gradient(90deg, transparent, rgba(240,208,144,0.55));
+        }
+
+        /* ── status msg ── */
+        .msg-bar {
+          padding:8px 14px; background:rgba(10,9,6,0.55);
+          border:1px solid #181208; border-radius:2px;
+          text-align:center; margin-bottom:18px; min-height:34px;
+          display:flex; align-items:center; justify-content:center;
+        }
+        .msg-bar p { font-family:var(--font-p); font-style:italic; font-size:0.68rem; letter-spacing:0.05em; }
+
+        /* ── buttons ── */
+        .btn-row { display:flex; gap:10px; }
+
+        .btn-back {
+          flex:0 0 auto; background:transparent; color:var(--paper-dim);
+          border:1px solid #2d1a0a; border-radius:2px;
+          padding:11px 16px; font-family:var(--font-b);
+          font-size:0.65rem; letter-spacing:0.12em; text-transform:uppercase;
+          cursor:pointer; transition:border-color 0.25s, color 0.25s;
+        }
+        .btn-back:hover { border-color:var(--gold-dim); color:var(--gold); }
+
+        .btn-ready {
+          flex:1; border:none; border-radius:2px; padding:13px;
+          font-family:var(--font-b); font-size:0.76rem; letter-spacing:0.2em;
+          text-transform:uppercase; cursor:pointer; position:relative; overflow:hidden;
+          transition:background 0.3s, color 0.3s, box-shadow 0.3s, transform 0.15s;
+        }
+        .btn-ready.go {
+          background:var(--rust); color:#f5e8d5;
+          box-shadow:0 3px 0 #4a1805, 0 6px 22px rgba(138,48,16,0.45);
+        }
+        .btn-ready.go::after {
+          content:''; position:absolute; inset:0; pointer-events:none;
+          background:linear-gradient(180deg, rgba(255,255,255,0.09) 0%, transparent 55%);
+        }
+        .btn-ready.go:hover:not(:disabled) {
+          background:var(--rust-hi);
+          box-shadow:0 3px 0 #4a1805, 0 10px 30px rgba(184,64,32,0.5);
+          transform:translateY(-1px);
+        }
+        .btn-ready.go:active { transform:translateY(1px); }
+        .btn-ready.cancel {
+          background:transparent; color:var(--gold-dim);
+          border:1px solid var(--gold-dim);
+        }
+        .btn-ready.cancel:hover:not(:disabled) {
+          background:rgba(201,169,110,0.08); color:var(--gold); border-color:var(--gold);
+        }
+        .btn-ready:disabled { opacity:0.35; cursor:not-allowed; transform:none !important; }
+
+        /* ── launch overlay ── */
+        .launch-ov {
+          position:fixed; inset:0; background:#080705; z-index:200;
+          display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px;
+          animation:fadeIn 0.4s ease both;
+        }
+        @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+        .launch-ttl {
+          font-family:var(--font-d); color:var(--gold);
+          font-size:clamp(2.2rem,7vw,4rem);
+          animation:glow 0.7s ease infinite alternate;
+        }
+        @keyframes glow {
+          from { text-shadow:0 0 30px rgba(201,169,110,0.3); }
+          to   { text-shadow:0 0 80px rgba(201,169,110,0.75); }
+        }
+        .launch-sub { font-family:var(--font-p); font-style:italic; color:var(--paper-dim); font-size:0.88rem; letter-spacing:0.1em; }
+
+        @media (max-width:520px) { .lob-card { padding:28px 18px 22px; } }
+      `}</style>
+
+      {/* ── Launch overlay ── */}
+      {launching && (
+        <div className="launch-ov">
+          <div className="launch-ttl">DEADRAILS</div>
+          <div className="launch-sub">Preparando o confronto...</div>
+        </div>
+      )}
+
+      <main className="lob-root">
+        <div className="lob-card">
+
+          {/* Header */}
+          <div className="eyebrow">
+            <div className="eyebrow-ln" />
+            <span className="eyebrow-txt">Saloon · Deadrails</span>
+            <div className="eyebrow-ln r" />
           </div>
-          <h1 style={{ fontSize: "clamp(1.5rem, 5vw, 2.4rem)", color: "#c9a96e", marginBottom: 10, fontWeight: "bold" }}>
-            Aguardando Pistoleiros
-          </h1>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}>
-            <div style={{
-              width: 7, height: 7, borderRadius: "50%",
-              background: connected ? "#3a8a3a" : "#7a3010",
-              boxShadow: connected ? "0 0 5px #3a8a3a" : "none",
-            }} />
-            <span style={{ color: "#8a7d6e", fontSize: "0.68rem", letterSpacing: "0.1em" }}>
-              {connected ? "Conectado ao Multiplayer" : "Tentando conexão..."}
+
+          <h1 className="lob-title">Aguardando Pistoleiros</h1>
+          <p className="lob-sub">Até 4 por mesa — só os corajosos entram</p>
+
+          {/* Connection */}
+          <div className="conn-pill">
+            <div className={`conn-dot ${connected ? "on" : "off"}`} />
+            <span className="conn-txt">
+              {connected ? "Conectado ao servidor" : `Conectando${dots}`}
             </span>
           </div>
-        </div>
 
-        {/* Slots de Jogadores */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 9, marginBottom: 24 }}>
-          {[0, 1, 2, 3].map(i => {
-            const p = players[i];
-            const isMe = p?.id === myId;
-            return (
-              <div key={i} style={{
-                display: "flex", alignItems: "center", gap: 14, padding: "13px 16px",
-                background: p ? (isMe ? "rgba(201,169,110,0.06)" : "rgba(27,27,39,0.8)") : "rgba(10,9,6,0.25)",
-                border: isMe ? "1px solid #8a6e44" : p ? "1px solid #2d1a0a" : "1px dashed #1a1208",
-                borderRadius: "2px", transition: "all 0.3s",
-              }}>
-                <div style={{
-                  width: 40, height: 40, borderRadius: "2px",
-                  background: p ? "#1c1814" : "transparent",
-                  border: p ? "1px solid #2d1a0a" : "1px dashed #1a1208",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: "1.2rem", flexShrink: 0,
-                }}>
-                  {p ? ICONS[i] : ""}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  {p ? (
-                    <>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontSize: "0.9rem", color: isMe ? "#c9a96e" : "#d4c9b8", fontWeight: "bold" }}>
+          <div className="div-west"><span>✦</span></div>
+
+          {/* Slots */}
+          <div className="slots">
+            {[0, 1, 2, 3].map(i => {
+              const p    = players[i];
+              const isMe = p?.id === myId;
+              return (
+                <div
+                  key={i}
+                  className={`slot ${p ? "occ" : "empty"} ${isMe ? "mine" : ""} ${p ? "slot-enter" : ""}`}
+                >
+                  <div className="slot-av">{p ? AVATARS[i] : ""}</div>
+                  <div className="slot-info">
+                    {p ? (
+                      <>
+                        <div className="slot-name">
                           {p.name}
-                        </span>
-                        {isMe && <span style={{ fontSize: "0.52rem", color: "#8a6e44", textTransform: "uppercase", letterSpacing: "0.15em" }}>você</span>}
-                      </div>
-                      <div style={{ fontSize: "0.58rem", color: "#5c3518", textTransform: "uppercase", letterSpacing: "0.1em", marginTop: 1 }}>
-                        {SLOTS[i]}
-                      </div>
-                    </>
-                  ) : (
-                    <span style={{ color: "#1e1208", fontSize: "0.68rem", letterSpacing: "0.1em", textTransform: "uppercase" }}>Vago...</span>
+                          {isMe && <span className="you-tag">você</span>}
+                        </div>
+                        <div className="slot-rank">{TITLES[i]}</div>
+                      </>
+                    ) : (
+                      <div className="slot-empty-lbl">Vago...</div>
+                    )}
+                  </div>
+                  {p && (
+                    <div className={`badge ${p.ready ? "rdy" : "wai"}`}>
+                      {p.ready ? "✓ Pronto" : "Aguardando"}
+                    </div>
                   )}
                 </div>
-                {p && (
-                  <div style={{
-                    padding: "3px 11px",
-                    background: p.ready ? "rgba(58,138,58,0.12)" : "transparent",
-                    border: `1px solid ${p.ready ? "#3a8a3a" : "#2d1a0a"}`,
-                    borderRadius: "20px", fontSize: "0.58rem", textTransform: "uppercase",
-                    letterSpacing: "0.12em", color: p.ready ? "#3a8a3a" : "#5c3518",
-                  }}>
-                    {p.ready ? "✓ Pronto" : "aguardando"}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
 
-        {/* Status */}
-        <div style={{ marginBottom: 18, padding: "9px 14px", background: "rgba(10,9,6,0.5)", border: "1px solid #1a1208", borderRadius: "2px", textAlign: "center" }}>
-          <p style={{ fontSize: "0.68rem", color: allReady ? "#3a8a3a" : "#8a7d6e", fontStyle: "italic" }}>
-            {players.length === 0 ? "O Saloon está vazio..."
-              : allReady ? "✦ Todos prontos! Abrindo as portas..."
-              : `${players.filter(p => p.ready).length}/${players.length} prontos — aperte o botão abaixo`}
-          </p>
-        </div>
+          {/* Progress */}
+          <div className="prog-wrap">
+            <div className="prog-lbl">
+              <span>Prontos para o duelo</span>
+              <span>{readyCount} / {players.length || "—"}</span>
+            </div>
+            <div className="prog-track">
+              <div
+                className="prog-fill"
+                style={{ width: players.length ? `${(readyCount / players.length) * 100}%` : "0%" }}
+              />
+            </div>
+          </div>
 
-        {/* Botões */}
-        <div style={{ display: "flex", gap: 10 }}>
-          <button
-            onClick={() => { wsRef.current?.close(); router.push("/"); }}
-            className="btn-ghost"
-            style={{ flex: "0 0 auto", fontSize: "0.7rem", padding: "11px 16px", cursor: "pointer" }}
-          >
-            ← Sair
-          </button>
-          <button
-            onClick={toggleReady}
-            className={me?.ready ? "btn-ghost" : "btn-primary"}
-            style={{
-              flex: 1,
-              fontSize: "0.78rem",
-              letterSpacing: "0.16em",
-              cursor: "pointer",
-            }}
-            disabled={!connected || !me}
-          >
-            {me?.ready ? "✕ CANCELAR PRONTO" : "✦ ESTOU PRONTO ✦"}
-          </button>
-        </div>
+          {/* Message */}
+          <div className="msg-bar">
+            <p style={{ color: allReady ? "var(--green-hi)" : "var(--paper-dim)" }}>
+              {players.length === 0
+                ? "O saloon está vazio... entre e aguarde."
+                : allReady
+                  ? "✦ Todos prontos! Abrindo as portas do duelo..."
+                  : `${readyCount} de ${players.length} pistoleiro${players.length > 1 ? "s" : ""} pronto${readyCount !== 1 ? "s" : ""}`}
+            </p>
+          </div>
 
-      </div>
-    </main>
+          {/* Buttons */}
+          <div className="btn-row">
+            <button
+              className="btn-back"
+              onClick={() => { wsRef.current?.close(); router.push("/"); }}
+            >
+              ← Sair
+            </button>
+            <button
+              className={`btn-ready ${me?.ready ? "cancel" : "go"}`}
+              onClick={toggleReady}
+              disabled={!connected || !me}
+            >
+              {me?.ready ? "✕ Cancelar Pronto" : "✦ Estou Pronto ✦"}
+            </button>
+          </div>
+
+        </div>
+      </main>
+    </>
   );
 }
